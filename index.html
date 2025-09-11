@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Blackbody Spectrum Lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals -->
+    <!-- Application Structure Plan: The application is designed as an interactive dashboard. The core of the experience is a large, dynamic chart that visualizes the blackbody spectrum. Users select an object (Earth, Sun, etc.) via prominent buttons or a logarithmic slider. This action instantly updates the chart and an adjacent "Data Panel" with key statistics and observations. This structure was chosen over a linear slide format to foster active exploration and make the cause-and-effect relationship between temperature and radiation immediately apparent. Static sections below provide theoretical context and a summary table, ensuring all information is available in a single, non-linear view. -->
+    <!-- Visualization & Content Choices: 
+        - Report Info: Spectral distribution curves. -> Goal: Compare curve shape/peak. -> Viz: Dynamic Line Chart. -> Interaction: Updates on button click or slider input. -> Justification: The most direct way to visualize radiation curves. -> Library: Chart.js (Canvas).
+        - Report Info: The four objects. -> Goal: User selection. -> Viz: Styled Buttons. -> Interaction: Click triggers JS update function. -> Justification: Simple and intuitive for a fixed set of choices. -> Library: HTML/JS.
+        - Report Info: Key data (Temp, Peak λ, etc.). -> Goal: Inform. -> Viz: Dynamic "Data Panel" card. -> Interaction: Text content updates with chart. -> Justification: Keeps quantitative data tightly coupled with its visualization. -> Library: HTML/JS.
+        - Report Info: Physics Laws. -> Goal: Provide context. -> Viz: Static formatted text sections. -> Interaction: None. -> Justification: Foundational info that supports the interactive elements. -> Library: HTML.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FDFBF8;
+            color: #383838;
+        }
+        .active-btn {
+            background-color: #A855F7 !important;
+            color: #FFFFFF !important;
+            transform: scale(1.05);
+            box-shadow: 0 4px 14px 0 rgb(0 0 0 / 10%);
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 450px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 450px;
+            }
+        }
+        .visible-spectrum {
+            position: absolute;
+            bottom: 30px; 
+            height: 10px;
+            width: 100%;
+            background: linear-gradient(to right, 
+                rgba(255, 0, 0, 0) 0%, rgba(255, 0, 0, 0) 38.0%, 
+                #8F00FF 38.0%, #4B0082 45.0%, #0000FF 49.5%, #00FF00 56.5%, 
+                #FFFF00 59.0%, #FF7F00 62.5%, #FF0000 75.0%,
+                rgba(255, 0, 0, 0) 75.0%, rgba(255, 0, 0, 0) 100%
+            );
+            opacity: 0.3;
+            pointer-events: none;
+        }
+        .peak-line {
+            position: absolute;
+            bottom: 30px;
+            height: calc(100% - 30px);
+            width: 2px;
+            background-color: #A855F7;
+            transition: left 0.5s ease-in-out;
+            opacity: 0.7;
+        }
+        .peak-label {
+            position: absolute;
+            top: -25px;
+            transform: translateX(-50%);
+            background-color: #A855F7;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-purple-600">A Study of the Blackbody Spectrum</h1>
+            <p class="mt-2 text-lg text-gray-600">Investigating Temperature and Radiation with an Interactive Explorer</p>
+        </header>
+
+        <main>
+            <div class="bg-white rounded-2xl shadow-lg p-6 md:p-8">
+                <div class="text-center mb-6">
+                     <p class="text-gray-700 max-w-3xl mx-auto">This application interactively demonstrates how the radiation emitted by a "blackbody" changes with its temperature. Select an object below to see its radiation curve and discover why things glow at different colors—or why some don't glow at all in the visible spectrum.
+                    </p>
+                </div>
+
+                <div id="controls" class="flex flex-wrap justify-center gap-3 mb-8">
+                </div>
+
+                <div class="mt-6 mb-8 px-4">
+                    <label for="temp-slider" class="block text-center text-gray-600 mb-2">Or, explore with the logarithmic temperature slider:</label>
+                    <div class="flex items-center justify-center gap-4">
+                        <input id="temp-slider" type="range" min="0" max="1000" value="500" class="w-full max-w-lg h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        <span id="temp-output" class="font-semibold text-purple-600 text-lg w-28 text-center">5800 K</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
+                    <div id="info-panel" class="lg:col-span-1 order-2 lg:order-1 flex flex-col justify-center space-y-4">
+                    </div>
+
+                    <div class="lg:col-span-2 order-1 lg:order-2">
+                        <div class="chart-container-wrapper relative">
+                            <div class="chart-container">
+                                <canvas id="blackbodyChart"></canvas>
+                                <div id="peak-line" class="peak-line" style="left: 50%;">
+                                    <div id="peak-label" class="peak-label"></div>
+                                </div>
+                            </div>
+                            <div class="visible-spectrum-container" style="position: relative; width:100%; max-width: 800px; margin: 0 auto;">
+                                <div class="visible-spectrum"></div>
+                                <div class="absolute w-full bottom-0 text-xs text-center text-gray-500">
+                                    <span class="absolute" style="left: 38.0%">400nm</span>
+                                    <span class="absolute" style="left: 75.0%">750nm</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <section id="principles" class="mt-10">
+                 <h2 class="text-2xl font-bold text-center mb-6 text-purple-600">Core Principles of Blackbody Radiation</h2>
+                <div class="grid md:grid-cols-2 gap-8">
+                    <div class="bg-white rounded-2xl shadow-lg p-6">
+                        <h3 class="font-semibold text-lg mb-2">Wien’s Displacement Law</h3>
+                        <p class="text-gray-600">This law explains why the color of a glowing object changes with temperature. It states that the peak wavelength (λ<sub>max</sub>) of emitted radiation is inversely proportional to the temperature (T). Hotter objects peak at shorter wavelengths, shifting from red to blue to ultraviolet.</p>
+                        <p class="text-center text-lg font-mono bg-gray-100 p-3 rounded-md mt-4">λ<sub>max</sub> = b / T</p>
+                    </div>
+                     <div class="bg-white rounded-2xl shadow-lg p-6">
+                        <h3 class="font-semibold text-lg mb-2">Stefan-Boltzmann Law</h3>
+                        <p class="text-gray-600">This law describes why hotter objects are so much brighter. The total power (P) radiated by a blackbody is proportional to the fourth power of its temperature (T). A small increase in temperature leads to a massive increase in radiated energy.</p>
+                        <p class="text-center text-lg font-mono bg-gray-100 p-3 rounded-md mt-4">P = σT<sup>4</sup></p>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="summary" class="mt-10">
+                <h2 class="text-2xl font-bold text-center mb-6 text-purple-600">Comparative Summary</h2>
+                <div class="bg-white rounded-2xl shadow-lg p-6 overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="p-3">Object</th>
+                                <th class="p-3">Temperature (K)</th>
+                                <th class="p-3">Peak λ (μm)</th>
+                                <th class="p-3">Spectral Region</th>
+                                <th class="p-3">Perceived Appearance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="border-b">
+                                <td class="p-3 font-medium">Earth</td>
+                                <td class="p-3">250</td>
+                                <td class="p-3">11.6</td>
+                                <td class="p-3">Infrared</td>
+                                <td class="p-3">Invisible</td>
+                            </tr>
+                             <tr class="border-b">
+                                <td class="p-3 font-medium">Light Bulb</td>
+                                <td class="p-3">3000</td>
+                                <td class="p-3">0.97</td>
+                                <td class="p-3">Near Infrared</td>
+                                <td class="p-3">Reddish Glow</td>
+                            </tr>
+                            <tr class="border-b">
+                                <td class="p-3 font-medium">Sun</td>
+                                <td class="p-3">5800</td>
+                                <td class="p-3">0.50</td>
+                                <td class="p-3">Visible Green</td>
+                                <td class="p-3">White-Yellow</td>
+                            </tr>
+                            <tr>
+                                <td class="p-3 font-medium">Sirius A</td>
+                                <td class="p-3">9850</td>
+                                <td class="p-3">0.29</td>
+                                <td class="p-3">UV/Blue</td>
+                                <td class="p-3">Blue</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="conclusion" class="mt-10">
+                <h2 class="text-2xl font-bold text-center mb-6 text-purple-600">Conclusion of the Simulation</h2>
+                <div class="bg-white rounded-2xl shadow-lg p-6 md:p-8 text-center">
+                    <p class="text-gray-700 max-w-3xl mx-auto mb-6">This interactive simulation demonstrates that the spectrum of radiation emitted by a blackbody is strongly dependent on its temperature, providing a clear visual confirmation of key physics principles.</p>
+                    <ul class="text-left max-w-2xl mx-auto space-y-3 text-gray-600">
+                        <li class="flex items-start">
+                            <span class="text-purple-500 mr-3 mt-1">✓</span>
+                            <span><strong>Temperature Dictates the Spectrum:</strong> Increasing temperature causes the peak emission to shift toward shorter, higher-energy wavelengths (from infrared to visible to ultraviolet) and dramatically increases the total radiated intensity.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-purple-500 mr-3 mt-1">✓</span>
+                            <span><strong>Laws Confirmed:</strong> The observed shifts in peak wavelength and intensity directly validate Wien’s Displacement Law and the Stefan-Boltzmann Law, respectively.</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-purple-500 mr-3 mt-1">✓</span>
+                            <span><strong>Explains Real-World Phenomena:</strong> This relationship explains why cool objects like Earth radiate invisible heat, why the Sun's light peaks in the visible spectrum that supports life, and why very hot stars like Sirius A appear blue.</span>
+                        </li>
+                         <li class="flex items-start">
+                            <span class="text-purple-500 mr-3 mt-1">✓</span>
+                            <span><strong>Simulation Details:</strong> This session was recorded on Thursday, September 11, 2025, at 1:45 PM PST in Pasay City, Metro Manila, Philippines.</span>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const blackbodyData = {
+            'Earth': {
+                temp: 250,
+                peak_wl: 11.6,
+                intensity: 2.22e2,
+                observation: "Earth emits almost entirely in the infrared range, not in the visible spectrum. Implication: Earth doesn’t produce visible light on its own; it radiates heat instead.",
+                icon: '🌍',
+                color: 'bg-green-500',
+                x_max: 25,
+                spectral_region: "Infrared",
+            },
+            'Light Bulb': {
+                temp: 3000,
+                peak_wl: 0.97,
+                intensity: 4.59e6,
+                observation: "Most of the radiation is infrared, with some weak visible red/orange light. Implication: Explains why incandescent bulbs appear “yellowish-orange” and are inefficient (waste much energy as heat).",
+                icon: '💡',
+                color: 'bg-orange-500',
+                x_max: 3,
+                spectral_region: "Near Infrared",
+            },
+            'Sun': {
+                temp: 5800,
+                peak_wl: 0.50,
+                intensity: 6.42e7,
+                observation: "Strong emission across the visible spectrum with the peak in green but balanced enough to appear white/yellowish. Implication: The Sun’s temperature makes it a nearly perfect source of visible light for life on Earth.",
+                icon: '☀️',
+                color: 'bg-yellow-500',
+                x_max: 2,
+                spectral_region: "Visible (Green)",
+            },
+            'Sirius A': {
+                temp: 9850,
+                peak_wl: 0.29,
+                intensity: 5.34e8,
+                observation: "Emits strongly in the UV and blue part of the visible spectrum. Implication: Hot stars like Sirius A appear blue-white and give off a lot of ultraviolet radiation.",
+                icon: '⭐',
+                color: 'bg-blue-500',
+                x_max: 1.5,
+                spectral_region: "Ultraviolet",
+            }
+        };
+
+        const MIN_TEMP = 250;
+        const MAX_TEMP = 12000;
+        const SLIDER_MIN = 0;
+        const SLIDER_MAX = 1000;
+
+        const MIN_LOG_TEMP = Math.log(MIN_TEMP);
+        const MAX_LOG_TEMP = Math.log(MAX_TEMP);
+        const LOG_SCALE = (MAX_LOG_TEMP - MIN_LOG_TEMP) / (SLIDER_MAX - SLIDER_MIN);
+
+        function tempToSliderVal(temp) {
+            return SLIDER_MIN + (Math.log(temp) - MIN_LOG_TEMP) / LOG_SCALE;
+        }
+
+        function sliderValToTemp(val) {
+            return Math.exp(MIN_LOG_TEMP + (val - SLIDER_MIN) * LOG_SCALE);
+        }
+
+        function getSpectralRegion(wl) {
+            if (wl < 0.4) return "Ultraviolet";
+            if (wl <= 0.75) return "Visible";
+            if (wl <= 2.5) return "Near Infrared";
+            return "Infrared";
+        }
+
+        function formatIntensity(value) {
+            if (value < 1e3) {
+                return value.toFixed(2) + ' W/m²';
+            } else if (value < 1e6) {
+                return (value / 1e3).toFixed(2) + ' kW/m²';
+            } else if (value < 1e9) {
+                return (value / 1e6).toFixed(2) + ' MW/m²';
+            } else if (value < 1e12) {
+                return (value / 1e9).toFixed(2) + ' GW/m²';
+            } else {
+                return (value / 1e12).toFixed(2) + ' TW/m²';
+            }
+        }
+
+        function plancksLaw(wav, temp) {
+            const h = 6.626e-34;
+            const c = 3.0e8;
+            const k = 1.38e-23;
+            const wav_m = wav * 1e-6; 
+            const a = (2 * h * c * c) / Math.pow(wav_m, 5);
+            const b = h * c / (wav_m * k * temp);
+            const intensity = a / (Math.exp(b) - 1);
+            return intensity;
+        }
+
+        function generateSpectrumData(temp, x_max) {
+            const data = [];
+            const steps = 200;
+            for (let i = 1; i <= steps; i++) {
+                const wav = (i / steps) * x_max; 
+                data.push({ x: wav, y: plancksLaw(wav, temp) });
+            }
+            return data;
+        }
+        
+        let myChart;
+        const ctx = document.getElementById('blackbodyChart').getContext('2d');
+        const infoPanel = document.getElementById('info-panel');
+        const controlsContainer = document.getElementById('controls');
+        const peakLine = document.getElementById('peak-line');
+        const peakLabel = document.getElementById('peak-label');
+        const tempSlider = document.getElementById('temp-slider');
+        const tempOutput = document.getElementById('temp-output');
+
+        function updateDisplay(config) {
+            const { objectName, icon, temp, peak_wl, intensity, observation, x_max, spectral_region } = config;
+            
+            infoPanel.innerHTML = `
+                <div class="text-center lg:text-left">
+                     <h2 class="text-2xl sm:text-3xl font-bold flex items-center justify-center lg:justify-start gap-3">
+                        <span class="text-4xl">${icon}</span>
+                        ${objectName}
+                    </h2>
+                </div>
+                <div class="bg-gray-50 rounded-lg p-4 text-center lg:text-left">
+                    <p class="text-sm text-gray-500">Temperature</p>
+                    <p class="text-2xl font-semibold text-purple-600">${Math.round(temp).toLocaleString()} K</p>
+                </div>
+                 <div class="bg-gray-50 rounded-lg p-4 text-center lg:text-left">
+                    <p class="text-sm text-gray-500">Peak Wavelength (λ<sub>max</sub>)</p>
+                    <p class="text-2xl font-semibold text-purple-600">${peak_wl.toFixed(2)} μm</p>
+                </div>
+                 <div class="bg-gray-50 rounded-lg p-4 text-center lg:text-left">
+                    <p class="text-sm text-gray-500">Peak Spectral Region</p>
+                    <p class="text-2xl font-semibold text-purple-600">${spectral_region}</p>
+                </div>
+                 <div class="bg-gray-50 rounded-lg p-4 text-center lg:text-left">
+                    <p class="text-sm text-gray-500">Intensity</p>
+                    <p class="text-2xl font-semibold text-purple-600">${formatIntensity(intensity)}</p>
+                </div>
+                <div>
+                     <p class="text-gray-600 text-center lg:text-left italic">"${observation}"</p>
+                </div>
+            `;
+
+            const spectrumData = generateSpectrumData(temp, x_max);
+            myChart.data.datasets[0].data = spectrumData;
+            myChart.options.scales.x.max = x_max;
+            myChart.options.scales.y.max = Math.max(...spectrumData.map(p => p.y)) * 1.1;
+            myChart.update();
+
+            const peakPositionPercent = (peak_wl / x_max) * 100;
+            peakLine.style.left = `${peakPositionPercent}%`;
+            peakLabel.textContent = `λmax: ${peak_wl.toFixed(2)} μm`;
+        }
+
+        function updateView(objectName) {
+            const data = blackbodyData[objectName];
+            updateDisplay({ ...data, objectName });
+            
+            tempSlider.value = tempToSliderVal(data.temp);
+            tempOutput.textContent = `${data.temp.toLocaleString()} K`;
+
+            document.querySelectorAll('#controls button').forEach(btn => {
+                if (btn.dataset.object === objectName) {
+                    btn.classList.add('active-btn');
+                } else {
+                    btn.classList.remove('active-btn');
+                }
+            });
+        }
+
+        function handleSliderInput(e) {
+            const sliderVal = parseInt(e.target.value);
+            const temp = sliderValToTemp(sliderVal);
+            tempOutput.textContent = `${Math.round(temp).toLocaleString()} K`;
+            
+            document.querySelectorAll('#controls button').forEach(btn => {
+                btn.classList.remove('active-btn');
+            });
+
+            const peak_wl = 2898 / temp;
+            const intensity = 5.67e-8 * Math.pow(temp, 4);
+            const x_max = Math.min(30, Math.max(1.5, peak_wl * 4));
+            const spectral_region = getSpectralRegion(peak_wl);
+
+            updateDisplay({
+                temp: temp,
+                peak_wl: peak_wl,
+                intensity: intensity,
+                x_max: x_max,
+                spectral_region: spectral_region,
+                objectName: 'Custom Body',
+                icon: '🌡️',
+                observation: 'Radiation profile for a custom temperature. Notice how the peak wavelength and intensity change as you adjust the slider.'
+            });
+        }
+        
+        function init() {
+            Object.keys(blackbodyData).forEach(name => {
+                const data = blackbodyData[name];
+                const button = document.createElement('button');
+                button.dataset.object = name;
+                button.className = `px-4 py-2 rounded-full font-semibold transition-all duration-300 ease-in-out text-gray-700 bg-gray-100 hover:bg-purple-200`;
+                button.innerHTML = `<span class="mr-2">${data.icon}</span> ${name}`;
+                button.onclick = () => updateView(name);
+                controlsContainer.appendChild(button);
+            });
+
+            tempSlider.addEventListener('input', handleSliderInput);
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Spectral Intensity',
+                        data: [],
+                        borderColor: '#A855F7',
+                        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                        borderWidth: 3,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Wavelength (μm)',
+                                font: { size: 14 }
+                            },
+                            min: 0,
+                        },
+                        y: {
+                            type: 'linear',
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Intensity (W/m²)',
+                                font: { size: 14 }
+                            },
+                            ticks: {
+                                callback: function(value, index, values) {
+                                    if (value === 0) return '0';
+                                    if (value < 1e3) return value.toFixed(0);
+                                    if (value < 1e6) return (value / 1e3).toFixed(0) + ' k';
+                                    if (value < 1e9) return (value / 1e6).toFixed(0) + ' M';
+                                    if (value < 1e12) return (value / 1e9).toFixed(0) + ' G';
+                                    return (value / 1e12).toFixed(0) + ' T';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                title: (tooltipItems) => `Wavelength: ${tooltipItems[0].parsed.x.toFixed(2)} μm`,
+                                label: (tooltipItem) => `Intensity: ${formatIntensity(tooltipItem.parsed.y)}`,
+                            }
+                        }
+                    }
+                }
+            });
+            updateView('Sun');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
+
